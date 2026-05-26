@@ -4,15 +4,32 @@
   <meta charset="UTF-8">
   <title>Magic Link Shopping</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 2em auto; padding: 0 1em; }
-    input, button { padding: 0.6em; font-size: 1em; }
-    input { width: 100%; margin-bottom: 0.5em; box-sizing: border-box; }
-    button { cursor: pointer; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { margin-bottom: 1em; }
+    input, button { padding: 0.7em; font-size: 1em; border-radius: 6px; border: 1px solid #ccc; }
+    input { width: 100%; margin-bottom: 0.5em; }
+    button { cursor: pointer; background: #2563eb; color: white; border: none; }
+    button:hover { background: #1d4ed8; }
+    button.secondary { background: #6b7280; }
+    button.secondary:hover { background: #4b5563; }
+    button.danger { background: transparent; color: #dc2626; padding: 0.3em 0.6em; }
+    button.danger:hover { background: #fee2e2; }
     .hidden { display: none; }
     .msg { padding: 0.8em; border-radius: 4px; margin: 1em 0; }
     .msg.success { background: #d4edda; color: #155724; }
     .msg.error { background: #f8d7da; color: #721c24; }
     .msg.info { background: #d1ecf1; color: #0c5460; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; }
+    .header small { color: #666; }
+    .add-row { display: flex; gap: 0.5em; margin-bottom: 1em; }
+    .add-row input[name="item"] { flex: 1; margin: 0; }
+    .add-row input[name="quantity"] { width: 80px; margin: 0; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: 0.8em; padding: 0.6em; border-bottom: 1px solid #eee; }
+    li.checked .label { text-decoration: line-through; color: #999; }
+    .label { flex: 1; }
+    .qty { color: #666; font-size: 0.9em; }
   </style>
 </head>
 <body>
@@ -25,31 +42,49 @@
   </div>
 
   <div id="view-logged" class="hidden">
-    <p>Connecté en tant que <strong id="user-email"></strong>.</p>
-    <button id="btn-logout">Se déconnecter</button>
-    <p><em>(La liste de courses arrive à l'étape 4.)</em></p>
+    <div class="header">
+      <small>Connecté : <strong id="user-email"></strong></small>
+      <button class="secondary" id="btn-logout">Déconnexion</button>
+    </div>
+
+    <div class="add-row">
+      <input type="text" name="item" id="new-item" placeholder="Ex: Lait" />
+      <input type="text" name="quantity" id="new-qty" placeholder="Qté" value="1" />
+      <button id="btn-add">Ajouter</button>
+    </div>
+
+    <ul id="items-list"></ul>
+    <p id="empty-msg" class="hidden" style="color:#666; text-align:center;">Aucun item. Ajoute-en un !</p>
   </div>
 
   <div id="msg-zone"></div>
 
   <script>
-    const API_URL = 'https://script.google.com/macros/s/AKfycby4ZFuwmxijNHoI6quvc5gZ6DxBcpkPMZpOr7EircxDmi-H5sPPA34fCg5pnv1MR_cL/exec'; // ⚠️ TA URL
+    const API_URL = 'https://script.google.com/macros/s/AKfycby4ZFuwmxijNHoI6quvc5gZ6DxBcpkPMZpOr7EircxDmi-H5sPPA34fCg5pnv1MR_cL/exec';
 
     const $ = (id) => document.getElementById(id);
     const msgZone = $('msg-zone');
 
-    function showMsg(text, type = 'info') {
+    function showMsg(text, type = 'info', autoHide = false) {
       msgZone.innerHTML = `<div class="msg ${type}">${text}</div>`;
+      if (autoHide) setTimeout(() => msgZone.innerHTML = '', 3000);
     }
-    function clearMsg() { msgZone.innerHTML = ''; }
 
     async function apiCall(action, params = {}) {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action, ...params })
-      });
-      return res.json();
+      const sessionToken = localStorage.getItem('sessionToken');
+      const body = { action, ...params };
+      if (sessionToken) body.sessionToken = sessionToken;
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(body)
+        });
+        return res.json();
+      } catch (err) {
+        return { ok: false, error: 'Réseau : ' + err.message };
+      }
     }
 
     function showLoggedView(email) {
@@ -63,7 +98,105 @@
       $('view-logged').classList.add('hidden');
     }
 
-    // === Demande de magic link ===
+    function clearSession() {
+      localStorage.removeItem('sessionToken');
+      localStorage.removeItem('userEmail');
+    }
+
+    // === Rendu de la liste ===
+    function renderItems(items) {
+      const list = $('items-list');
+      list.innerHTML = '';
+
+      if (!items || items.length === 0) {
+        $('empty-msg').classList.remove('hidden');
+        return;
+      }
+      $('empty-msg').classList.add('hidden');
+
+      // Tri : non cochés d'abord, puis par date de création
+      items.sort((a, b) => {
+        if (a.checked !== b.checked) return a.checked ? 1 : -1;
+        return new Date(a.createdAt) - new Date(b.createdAt);
+      });
+
+      for (const it of items) {
+        const li = document.createElement('li');
+        if (it.checked) li.classList.add('checked');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = it.checked;
+        checkbox.addEventListener('change', () => toggleItem(it.id));
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = it.item;
+
+        const qty = document.createElement('span');
+        qty.className = 'qty';
+        qty.textContent = '× ' + it.quantity;
+
+        const del = document.createElement('button');
+        del.className = 'danger';
+        del.textContent = '🗑';
+        del.title = 'Supprimer';
+        del.addEventListener('click', () => deleteItem(it.id));
+
+        li.appendChild(checkbox);
+        li.appendChild(label);
+        li.appendChild(qty);
+        li.appendChild(del);
+        list.appendChild(li);
+      }
+    }
+
+    // === Actions ===
+    async function loadItems() {
+      const res = await apiCall('getItems');
+      if (res.ok) {
+        renderItems(res.items);
+      } else {
+        // Session invalide ou expirée : retour à l'écran login
+        if (res.error === 'Invalid session' || res.error === 'Session expired' || res.error === 'Missing sessionToken') {
+          clearSession();
+          showLoginView();
+          showMsg('Session expirée, reconnecte-toi.', 'info');
+        } else {
+          showMsg('Erreur : ' + res.error, 'error');
+        }
+      }
+    }
+
+    async function addItem() {
+      const item = $('new-item').value.trim();
+      const quantity = $('new-qty').value.trim() || '1';
+      if (!item) return;
+
+      const res = await apiCall('addItem', { item, quantity });
+      if (res.ok) {
+        $('new-item').value = '';
+        $('new-qty').value = '1';
+        await loadItems();
+      } else {
+        showMsg('Erreur : ' + res.error, 'error');
+      }
+    }
+
+    async function toggleItem(id) {
+      const res = await apiCall('toggleItem', { id });
+      if (res.ok) await loadItems();
+      else showMsg('Erreur : ' + res.error, 'error');
+    }
+
+    async function deleteItem(id) {
+      if (!confirm('Supprimer cet item ?')) return;
+      const res = await apiCall('deleteItem', { id });
+      if (res.ok) await loadItems();
+      else showMsg('Erreur : ' + res.error, 'error');
+    }
+
+    // === Event listeners ===
     $('btn-request').addEventListener('click', async () => {
       const email = $('email-input').value.trim();
       if (!email) return showMsg('Email requis', 'error');
@@ -72,47 +205,46 @@
       const res = await apiCall('requestMagicLink', { email });
 
       if (res.ok) {
-        showMsg('✉️ Lien envoyé ! Vérifie ta boîte mail (et les spams).', 'success');
+        showMsg('✉️ Lien envoyé ! Vérifie ta boîte mail.', 'success');
       } else {
         showMsg('Erreur : ' + res.error, 'error');
       }
     });
 
-    // === Logout ===
-    $('btn-logout').addEventListener('click', () => {
-      localStorage.removeItem('sessionToken');
-      localStorage.removeItem('userEmail');
+    $('btn-add').addEventListener('click', addItem);
+    $('new-item').addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
+    $('new-qty').addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
+
+    $('btn-logout').addEventListener('click', async () => {
+      await apiCall('logout'); // invalide la session côté serveur
+      clearSession();
       showLoginView();
-      showMsg('Déconnecté.', 'info');
+      showMsg('Déconnecté.', 'info', true);
     });
 
-    // === Init : que faire au chargement ===
+    // === Init au chargement ===
     (async function init() {
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('token');
 
       if (token) {
-        // Cas 1 : on arrive depuis un magic link
         showMsg('Vérification du lien...', 'info');
         const res = await apiCall('verifyMagicLink', { token });
-
-        // Nettoyer l'URL dans tous les cas (le token ne doit pas traîner)
         history.replaceState({}, document.title, window.location.pathname);
 
         if (res.ok) {
           localStorage.setItem('sessionToken', res.sessionToken);
           localStorage.setItem('userEmail', res.email);
           showLoggedView(res.email);
-          showMsg('✅ Connecté !', 'success');
+          showMsg('✅ Connecté !', 'success', true);
+          await loadItems();
         } else {
           showMsg('Lien invalide ou expiré : ' + res.error, 'error');
         }
       } else if (localStorage.getItem('sessionToken')) {
-        // Cas 2 : on a déjà une session locale
-        // (À l'étape 4 on vérifiera sa validité côté serveur. Pour l'instant on fait confiance.)
         showLoggedView(localStorage.getItem('userEmail'));
+        await loadItems();
       }
-      // Cas 3 : pas de token, pas de session → on reste sur la vue login (par défaut)
     })();
   </script>
 </body>
