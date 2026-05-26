@@ -1,0 +1,1 @@
+# magiclink-shopping-frontend
