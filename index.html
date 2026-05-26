@@ -3,9 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <title>Magic Link Shopping</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }
+    button { padding: 0.6em 1.2em; font-size: 1em; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 1em; border-radius: 4px; overflow-x: auto; }
+  </style>
 </head>
 <body>
-  <h1>Setup OK</h1>
-  <p>Si tu vois cette page, GitHub Pages fonctionne.</p>
+  <h1>Test backend Apps Script</h1>
+
+  <button id="btn-get">Test GET</button>
+  <button id="btn-post">Test POST</button>
+
+  <h2>Réponse :</h2>
+  <pre id="output">(rien pour l'instant)</pre>
+
+  <script>
+    // ⚠️ Remplace par TON URL /exec
+    const API_URL = 'https://script.google.com/macros/s/AKfycby4ZFuwmxijNHoI6quvc5gZ6DxBcpkPMZpOr7EircxDmi-H5sPPA34fCg5pnv1MR_cL/exec';
+
+    const output = document.getElementById('output');
+
+    function show(data) {
+      output.textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById('btn-get').addEventListener('click', async () => {
+      output.textContent = 'Chargement...';
+      try {
+        const res = await fetch(`${API_URL}?action=ping&via=GET`);
+        const data = await res.json();
+        show(data);
+      } catch (err) {
+        show({ error: err.message });
+      }
+    });
+
+    document.getElementById('btn-post').addEventListener('click', async () => {
+      output.textContent = 'Chargement...';
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          // ⚠️ text/plain au lieu de application/json pour éviter le CORS preflight
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'ping', via: 'POST', test: 'data' })
+        });
+        const data = await res.json();
+        show(data);
+      } catch (err) {
+        show({ error: err.message });
+      }
+    });
+  </script>
 </body>
 </html>
