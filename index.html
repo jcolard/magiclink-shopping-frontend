@@ -4,56 +4,116 @@
   <meta charset="UTF-8">
   <title>Magic Link Shopping</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }
-    button { padding: 0.6em 1.2em; font-size: 1em; cursor: pointer; }
-    pre { background: #f4f4f4; padding: 1em; border-radius: 4px; overflow-x: auto; }
+    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 2em auto; padding: 0 1em; }
+    input, button { padding: 0.6em; font-size: 1em; }
+    input { width: 100%; margin-bottom: 0.5em; box-sizing: border-box; }
+    button { cursor: pointer; }
+    .hidden { display: none; }
+    .msg { padding: 0.8em; border-radius: 4px; margin: 1em 0; }
+    .msg.success { background: #d4edda; color: #155724; }
+    .msg.error { background: #f8d7da; color: #721c24; }
+    .msg.info { background: #d1ecf1; color: #0c5460; }
   </style>
 </head>
 <body>
-  <h1>Test backend Apps Script</h1>
+  <h1>🛒 Liste de courses</h1>
 
-  <button id="btn-get">Test GET</button>
-  <button id="btn-post">Test POST</button>
+  <div id="view-login">
+    <p>Saisis ton email pour recevoir un lien de connexion.</p>
+    <input type="email" id="email-input" placeholder="ton@email.com" />
+    <button id="btn-request">Recevoir le lien</button>
+  </div>
 
-  <h2>Réponse :</h2>
-  <pre id="output">(rien pour l'instant)</pre>
+  <div id="view-logged" class="hidden">
+    <p>Connecté en tant que <strong id="user-email"></strong>.</p>
+    <button id="btn-logout">Se déconnecter</button>
+    <p><em>(La liste de courses arrive à l'étape 4.)</em></p>
+  </div>
+
+  <div id="msg-zone"></div>
 
   <script>
-    // ⚠️ Remplace par TON URL /exec
-    const API_URL = 'https://script.google.com/macros/s/AKfycby4ZFuwmxijNHoI6quvc5gZ6DxBcpkPMZpOr7EircxDmi-H5sPPA34fCg5pnv1MR_cL/exec';
+    const API_URL = 'https://script.google.com/macros/s/AKfycby4ZFuwmxijNHoI6quvc5gZ6DxBcpkPMZpOr7EircxDmi-H5sPPA34fCg5pnv1MR_cL/exec'; // ⚠️ TA URL
 
-    const output = document.getElementById('output');
+    const $ = (id) => document.getElementById(id);
+    const msgZone = $('msg-zone');
 
-    function show(data) {
-      output.textContent = JSON.stringify(data, null, 2);
+    function showMsg(text, type = 'info') {
+      msgZone.innerHTML = `<div class="msg ${type}">${text}</div>`;
+    }
+    function clearMsg() { msgZone.innerHTML = ''; }
+
+    async function apiCall(action, params = {}) {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, ...params })
+      });
+      return res.json();
     }
 
-    document.getElementById('btn-get').addEventListener('click', async () => {
-      output.textContent = 'Chargement...';
-      try {
-        const res = await fetch(`${API_URL}?action=ping&via=GET`);
-        const data = await res.json();
-        show(data);
-      } catch (err) {
-        show({ error: err.message });
+    function showLoggedView(email) {
+      $('view-login').classList.add('hidden');
+      $('view-logged').classList.remove('hidden');
+      $('user-email').textContent = email;
+    }
+
+    function showLoginView() {
+      $('view-login').classList.remove('hidden');
+      $('view-logged').classList.add('hidden');
+    }
+
+    // === Demande de magic link ===
+    $('btn-request').addEventListener('click', async () => {
+      const email = $('email-input').value.trim();
+      if (!email) return showMsg('Email requis', 'error');
+
+      showMsg('Envoi en cours...', 'info');
+      const res = await apiCall('requestMagicLink', { email });
+
+      if (res.ok) {
+        showMsg('✉️ Lien envoyé ! Vérifie ta boîte mail (et les spams).', 'success');
+      } else {
+        showMsg('Erreur : ' + res.error, 'error');
       }
     });
 
-    document.getElementById('btn-post').addEventListener('click', async () => {
-      output.textContent = 'Chargement...';
-      try {
-        const res = await fetch(API_URL, {
-          method: 'POST',
-          // ⚠️ text/plain au lieu de application/json pour éviter le CORS preflight
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'ping', via: 'POST', test: 'data' })
-        });
-        const data = await res.json();
-        show(data);
-      } catch (err) {
-        show({ error: err.message });
-      }
+    // === Logout ===
+    $('btn-logout').addEventListener('click', () => {
+      localStorage.removeItem('sessionToken');
+      localStorage.removeItem('userEmail');
+      showLoginView();
+      showMsg('Déconnecté.', 'info');
     });
+
+    // === Init : que faire au chargement ===
+    (async function init() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+
+      if (token) {
+        // Cas 1 : on arrive depuis un magic link
+        showMsg('Vérification du lien...', 'info');
+        const res = await apiCall('verifyMagicLink', { token });
+
+        // Nettoyer l'URL dans tous les cas (le token ne doit pas traîner)
+        history.replaceState({}, document.title, window.location.pathname);
+
+        if (res.ok) {
+          localStorage.setItem('sessionToken', res.sessionToken);
+          localStorage.setItem('userEmail', res.email);
+          showLoggedView(res.email);
+          showMsg('✅ Connecté !', 'success');
+        } else {
+          showMsg('Lien invalide ou expiré : ' + res.error, 'error');
+        }
+      } else if (localStorage.getItem('sessionToken')) {
+        // Cas 2 : on a déjà une session locale
+        // (À l'étape 4 on vérifiera sa validité côté serveur. Pour l'instant on fait confiance.)
+        showLoggedView(localStorage.getItem('userEmail'));
+      }
+      // Cas 3 : pas de token, pas de session → on reste sur la vue login (par défaut)
+    })();
   </script>
 </body>
 </html>
